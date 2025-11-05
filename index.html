@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CS 348 Project Demo</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f9f9f9; }
+        h1, h2 { color: #333; }
+        input, select, button { padding: 8px; margin: 5px; font-size: 1em; border-radius: 4px; border: 1px solid #ccc; }
+        button { cursor: pointer; background-color: #007bff; color: white; border: none; }
+        button.edit { background-color: #ffc107; }
+        button.delete { background-color: #dc3545; }
+        #product-form, #filter-section { background-color: #fff; border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: #fff; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        #form-title { color: #007bff; }
+    </style>
+</head>
+<body>
+
+    <h1>Product Inventory Manager</h1>
+
+    <form id="product-form">
+        <h2 id="form-title">Add New Product</h2>
+        <input type="hidden" id="product-id">
+        <div>
+            <input type="text" id="product-name" placeholder="Product Name" required>
+            <input type="number" id="product-price" placeholder="Price" step="0.01" required>
+            <input type="number" id="product-quantity" placeholder="Quantity" required>
+            
+            <select id="product-category" required>
+                <option value="">Select a Category...</option>
+            </select>
+        </div>
+        <button type="submit" id="submit-button">Add Product</button>
+        <button type="button" id="cancel-edit" style="display:none;">Cancel</button>
+    </form>
+
+    <h2>Product Report</h2>
+    <div id="filter-section">
+        <strong>Filter Report:</strong>
+        <input type="number" id="min-price" placeholder="Min Price">
+        <input type="number" id="max-price" placeholder="Max Price">
+        <input type="number" id="min-qty" placeholder="Min Quantity">
+        <input type="number" id="max-qty" placeholder="Max Quantity">
+        <button id="filter-button">Apply Filter</button>
+        <button id="clear-filter-button">Clear Filter</button>
+    </div>
+
+    <table id="products-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Price</th>
+                <th>Quantity</th>
+                <th>Category</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="products-tbody">
+            </tbody>
+    </table>
+
+    <script>
+        const API_URL = 'http://localhost:3000/api';
+
+        // DOM elements
+        const form = document.getElementById('product-form');
+        const formTitle = document.getElementById('form-title');
+        const submitButton = document.getElementById('submit-button');
+        const cancelEditButton = document.getElementById('cancel-edit');
+        const categoryDropdown = document.getElementById('product-category');
+        const productsTbody = document.getElementById('products-tbody');
+        
+        // Form inputs
+        const hiddenId = document.getElementById('product-id');
+        const nameInput = document.getElementById('product-name');
+        const priceInput = document.getElementById('product-price');
+        const quantityInput = document.getElementById('product-quantity');
+
+        // Filter inputs
+        const filterButton = document.getElementById('filter-button');
+        const clearFilterButton = document.getElementById('clear-filter-button');
+        const minPriceInput = document.getElementById('min-price');
+        const maxPriceInput = document.getElementById('max-price');
+        const minQtyInput = document.getElementById('min-qty');
+        const maxQtyInput = document.getElementById('max-qty');
+
+
+        // Build Dynamic UI 
+        // This function is called on page load.
+        async function loadCategories() {
+            try {
+                const response = await fetch(`${API_URL}/categories`);
+                const categories = await response.json();
+                
+                // Clear all options except the first "Select..." one
+                categoryDropdown.innerHTML = '<option value="">Select a Category...</option>';
+                
+                categories.forEach(cat => {
+                    const option = document.createElement('option');
+                    option.value = cat.category_id;
+                    option.textContent = cat.category_name;
+                    categoryDropdown.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading categories:', error);
+            }
+        }
+
+
+        // Display Report (with Filtering)
+        // This function fetches products and redraws the table.
+        async function loadProducts(filters = {}) {
+            // Build query string from filter object
+            const queryParams = new URLSearchParams(filters);
+            const queryString = queryParams.toString();
+            
+            try {
+                const response = await fetch(`${API_URL}/products?${queryString}`);
+                const products = await response.json();
+                
+                // Clear the table body
+                productsTbody.innerHTML = '';
+                
+                if (products.length === 0) {
+                    productsTbody.innerHTML = '<tr><td colspan="5">No products found.</td></tr>';
+                    return;
+                }
+
+                products.forEach(product => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${product.product_name}</td>
+                        <td>$${product.price.toFixed(2)}</td>
+                        <td>${product.stock_quantity}</td>
+                        <td>${product.category_name}</td>
+                        <td>
+                            <button class="edit" onclick="prepUpdateForm(${product.product_id}, '${product.product_name}', ${product.price}, ${product.stock_quantity}, ${product.category_id})">Edit</button>
+                            <button class="delete" onclick="deleteProduct(${product.product_id})">Delete</button>
+                        </td>
+                    `;
+                    productsTbody.appendChild(tr);
+                });
+            } catch (error) {
+                console.error('Error loading products:', error);
+            }
+        }
+        
+        // Event Listeners for Filtering
+        filterButton.addEventListener('click', () => {
+            const filters = {
+                minPrice: minPriceInput.value,
+                maxPrice: maxPriceInput.value,
+                minQty: minQtyInput.value,
+                maxQty: maxQtyInput.value,
+            };
+            // Remove empty filters
+            Object.keys(filters).forEach(key => (filters[key] === '') && delete filters[key]);
+            
+            loadProducts(filters);
+        });
+
+        clearFilterButton.addEventListener('click', () => {
+            minPriceInput.value = '';
+            maxPriceInput.value = '';
+            minQtyInput.value = '';
+            maxQtyInput.value = '';
+            loadProducts(); // Load all products
+        });
+
+
+        // Insert, Update, Delete
+
+        // Form Submit (Handles both INSERT and UPDATE)
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault(); // Stop form from reloading page
+            
+            const id = hiddenId.value;
+            const productData = {
+                name: nameInput.value,
+                price: parseFloat(priceInput.value),
+                quantity: parseInt(quantityInput.value),
+                category_id: parseInt(categoryDropdown.value)
+            };
+
+            try {
+                if (id) {
+                    // UPDATE 
+                    await fetch(`${API_URL}/products/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(productData)
+                    });
+                } else {
+                    // INSERT 
+                    await fetch(`${API_URL}/products`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(productData)
+                    });
+                }
+                
+                resetForm();
+                loadProducts(); 
+                
+            } catch (error) {
+                console.error('Error saving product:', error);
+            }
+        });
+
+        // DELETE
+        async function deleteProduct(id) {
+            if (!confirm('Are you sure you want to delete this product?')) {
+                return;
+            }
+            try {
+                await fetch(`${API_URL}/products/${id}`, {
+                    method: 'DELETE'
+                });
+                loadProducts(); 
+            } catch (error) {
+                console.error('Error deleting product:', error);
+            }
+        }
+        
+        // Helper function to set up the form for an UPDATE 
+        function prepUpdateForm(id, name, price, quantity, categoryId) {
+            // This function is called by the "Edit" button
+            formTitle.textContent = 'Edit Product';
+            hiddenId.value = id;
+            nameInput.value = name;
+            priceInput.value = price;
+            quantityInput.value = quantity;
+            categoryDropdown.value = categoryId;
+            submitButton.textContent = 'Update Product';
+            cancelEditButton.style.display = 'inline-block';
+            window.scrollTo(0, 0); // Scroll to top
+        }
+
+        // Helper function to reset the form
+        function resetForm() {
+            formTitle.textContent = 'Add New Product';
+            hiddenId.value = '';
+            form.reset();
+            submitButton.textContent = 'Add Product';
+            cancelEditButton.style.display = 'none';
+        }
+        cancelEditButton.addEventListener('click', resetForm);
+
+
+        // Initial Page Load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadCategories(); 
+            loadProducts(); 
+        });
+
+    </script>
+</body>
+</html>
