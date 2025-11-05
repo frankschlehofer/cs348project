@@ -22,6 +22,14 @@
 
     <h1>Product Inventory Manager</h1>
 
+    <form id="category-form">
+        <h2>Add New Category</h2>
+        <div>
+            <input type="text" id="category-name" placeholder="New Category Name" required>
+            <button type="submit">Add Category</button>
+        </div>
+    </form>
+
     <form id="product-form">
         <h2 id="form-title">Add New Product</h2>
         <input type="hidden" id="product-id">
@@ -73,12 +81,15 @@
         const cancelEditButton = document.getElementById('cancel-edit');
         const categoryDropdown = document.getElementById('product-category');
         const productsTbody = document.getElementById('products-tbody');
+        const categoryForm = document.getElementById('category-form');
+        
         
         // Form inputs
         const hiddenId = document.getElementById('product-id');
         const nameInput = document.getElementById('product-name');
         const priceInput = document.getElementById('product-price');
         const quantityInput = document.getElementById('product-quantity');
+        const categoryNameInput = document.getElementById('category-name');
 
         // Filter inputs
         const filterButton = document.getElementById('filter-button');
@@ -174,7 +185,7 @@
 
         // Insert, Update, Delete
 
-        // Form Submit (Handles both INSERT and UPDATE)
+        // Form Submit (Handles both INSERT and UPDATE) for products
         form.addEventListener('submit', async (e) => {
             e.preventDefault(); // Stop form from reloading page
             
@@ -208,6 +219,39 @@
                 
             } catch (error) {
                 console.error('Error saving product:', error);
+            }
+        });
+
+        // Insert new category
+        categoryForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const categoryName = categoryNameInput.value;
+
+            if (!categoryName) return;
+
+            try {
+                const response = await fetch(`${API_URL}/categories`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: categoryName })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.message || 'Failed to add category');
+                }
+
+                // --- THIS IS THE KEY ---
+                // 1. Clear the input
+                categoryNameInput.value = '';
+                // 2. Reload the categories dropdown
+                loadCategories(); 
+
+                alert('Category added successfully!');
+
+            } catch (error) {
+                console.error('Error adding category:', error);
+                alert(error.message);
             }
         });
 

@@ -39,17 +39,6 @@ db.serialize(() => {
             FOREIGN KEY (category_id) REFERENCES Categories (category_id)
         )
     `, (err) => ifExists(err, 'Products'));
-
-    // Some data to have right away in the db for demo
-    const seedCategories = 'INSERT OR IGNORE INTO Categories (category_name) VALUES (?), (?), (?)';
-    db.run(seedCategories, ['Electronics', 'Books', 'Groceries'], (err) => ifExists(err, 'Seeded Categories'));
-
-    const seedProducts = 'INSERT OR IGNORE INTO Products (product_name, price, stock_quantity, category_id) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)';
-    db.run(seedProducts, [
-        'Laptop', 699.99, 10, 1,
-        'Science Fiction Novel', 14.50, 50, 2,
-        'Apples', 0.99, 200, 3
-    ], (err) => ifExists(err, 'Seeded Products'));
 });
 
 // Helper for cleaner startup logging
@@ -112,6 +101,28 @@ app.get('/api/products', (req, res) => {
     db.all(sql, params, (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(rows);
+    });
+});
+
+// Insert/create a new category
+app.post('/api/categories', (req, res) => {
+    const { name } = req.body;
+    if (!name) {
+        return res.status(400).json({ message: "Category name is required" });
+    }
+    const sql = "INSERT INTO Categories (category_name) VALUES (?)";
+    db.run(sql, [name], function(err) {
+        if (err && err.message.includes('UNIQUE constraint failed')) {
+            return res.status(409).json({ message: "Category already exists." });
+        }
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        // Respond with the newly created category
+        res.status(201).json({ 
+            id: this.lastID, 
+            name: name 
+        });
     });
 });
 
