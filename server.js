@@ -4,8 +4,8 @@ const cors = require('cors');
 
 // app and database setup
 const app = express();
-app.use(cors()); // Allow frontend to call backend
-app.use(express.json()); // Parse JSON request bodies
+app.use(cors()); 
+app.use(express.json()); 
 
 const PORT = 3000;
 // create db:  'inventory.db'
@@ -16,11 +16,10 @@ const db = new sqlite3.Database('./inventory.db', (err) => {
     console.log('Connected to the inventory database.');
 });
 
-// Database initialization. Runs once when the server starts.
 db.serialize(() => {
     console.log('Initializing database.');
     
-    // Categories Table
+    // Categories Table (Existing)
     db.run(`
         CREATE TABLE IF NOT EXISTS Categories (
             category_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,7 +27,7 @@ db.serialize(() => {
         )
     `, (err) => ifExists(err, 'Categories'));
 
-    // Products Table
+    // Products Table (Existing)
     db.run(`
         CREATE TABLE IF NOT EXISTS Products (
             product_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,6 +38,16 @@ db.serialize(() => {
             FOREIGN KEY (category_id) REFERENCES Categories (category_id)
         )
     `, (err) => ifExists(err, 'Products'));
+
+    // Index 1: Supports sorting by product name in the report.
+    db.run(`
+        CREATE INDEX IF NOT EXISTS idx_product_name ON Products (product_name);
+    `, (err) => ifExists(err, 'Index on Products(product_name)'));
+
+    // Index 2: Supports the range filtering on price and quantity in the report.
+    db.run(`
+        CREATE INDEX IF NOT EXISTS idx_price_qty ON Products (price, stock_quantity);
+    `, (err) => ifExists(err, 'Index on Products(price, stock_quantity)'));
 });
 
 // Helper for cleaner startup logging
@@ -165,6 +174,49 @@ app.delete('/api/products/:id', (req, res) => {
         if (err) return res.status(500).json({ error: err.message });
         if (this.changes === 0) return res.status(404).json({ message: "Product not found" });
         res.json({ message: "Deleted successfully", changes: this.changes });
+    });
+});
+
+app.post('/api/inventory/adjust', (req, res) => {
+    const { from_product_id, to_product_id, quantity } = req.body;
+    
+    // Start Transaction
+    db.run('BEGIN TRANSACTION;', (err) => {
+        if (err) return res.status(500).json({ error: "Failed to begin transaction: " + err.message });
+
+        // Operation 1: Decrease stock from the source product. 
+        // The WHERE clause checks if there is sufficient stock to ensure integrity.
+        const sql1 = "UPDATE Products SET stock_quantity = stock_quantity - ? WHERE product_id = ? AND stock_quantity >= ?";
+        db.run(sql1, [quantity, from_product_id, quantity], function (err) {
+            if (err || this.changes === 0) {
+                // Rollback if there's an error or if not enough stock was available
+                return db.run('ROLLBACK;', () => res.status(400).json({ 
+                    message: "Transaction rolled back: Insufficient stock or source product not found.",
+                    error: err ? err.message : "No changes made (Check stock and product ID)"
+                }));
+            }
+
+            // Operation 2: Increase stock in the destination product.
+            const sql2 = "UPDATE Products SET stock_quantity = stock_quantity + ? WHERE product_id = ?";
+            db.run(sql2, [quantity, to_product_id], function (err) {
+                if (err || this.changes === 0) {
+                    // Rollback if there's an error in the second query or if the destination product is invalid
+                    return db.run('ROLLBACK;', () => res.status(400).json({ 
+                        message: "Transaction rolled back: Destination product not found.",
+                        error: err ? err.message : "No changes made to destination product"
+                    }));
+                }
+                
+                // If both operations succeed, commit the transaction
+                db.run('COMMIT;', (err) => {
+                    if (err) {
+                        // This handles a rare case where commit fails, logging an inconsistency risk.
+                        return res.status(500).json({ message: "Commit failed (data consistency risk).", error: err.message });
+                    }
+                    res.json({ message: "Inventory adjustment successful (Atomic Transaction)." });
+                });
+            });
+        });
     });
 });
 

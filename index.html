@@ -11,7 +11,7 @@
         button { cursor: pointer; background-color: #007bff; color: white; border: none; }
         button.edit { background-color: #ffc107; }
         button.delete { background-color: #dc3545; }
-        #product-form, #filter-section { background-color: #fff; border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
+        #product-form, #filter-section, #inventory-adjust-form { background-color: #fff; border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: #fff; }
         th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
         th { background-color: #f2f2f2; }
@@ -46,6 +46,21 @@
         <button type="button" id="cancel-edit" style="display:none;">Cancel</button>
     </form>
 
+    <h2>Inventory Management</h2>
+    <form id="inventory-adjust-form">
+        <p>Simulate an atomic transfer of stock quantity between two products. Both updates must succeed, or both must fail (rollback).</p>
+        <div>
+            <select id="from-product-dropdown" required>
+                <option value="">Transfer Stock FROM...</option>
+            </select>
+            <select id="to-product-dropdown" required>
+                <option value="">Transfer Stock TO...</option>
+            </select>
+            <input type="number" id="transfer-quantity" placeholder="Transfer Quantity" required min="1">
+            <button type="submit">Transfer Stock (Atomic)</button>
+        </div>
+        <p id="transaction-status" style="margin-top: 10px; font-weight: bold;"></p>
+    </form>
     <h2>Product Report</h2>
     <div id="filter-section">
         <strong>Filter Report:</strong>
@@ -60,6 +75,7 @@
     <table id="products-table">
         <thead>
             <tr>
+                <th>ID</th> 
                 <th>Name</th>
                 <th>Price</th>
                 <th>Quantity</th>
@@ -98,10 +114,16 @@
         const maxPriceInput = document.getElementById('max-price');
         const minQtyInput = document.getElementById('min-qty');
         const maxQtyInput = document.getElementById('max-qty');
+        
+        // ✨ NEW: DOM elements for transaction form
+        const adjustForm = document.getElementById('inventory-adjust-form');
+        const fromProductDropdown = document.getElementById('from-product-dropdown');
+        const toProductDropdown = document.getElementById('to-product-dropdown');
+        const transferQuantityInput = document.getElementById('transfer-quantity');
+        const transactionStatus = document.getElementById('transaction-status');
 
 
-        // Build Dynamic UI 
-        // This function is called on page load.
+        // Build Dynamic UI (Categories)
         async function loadCategories() {
             try {
                 const response = await fetch(`${API_URL}/categories`);
@@ -120,12 +142,38 @@
                 console.error('Error loading categories:', error);
             }
         }
+        
+        async function loadProductDropdowns() {
+            try {
+                // Fetch all products
+                const response = await fetch(`${API_URL}/products`);
+                const products = await response.json();
+                
+                // Reset dropdowns
+                fromProductDropdown.innerHTML = '<option value="">Transfer Stock FROM...</option>';
+                toProductDropdown.innerHTML = '<option value="">Transfer Stock TO...</option>';
+
+                products.forEach(product => {
+                    // Create option for the "FROM" dropdown
+                    const fromOption = document.createElement('option');
+                    fromOption.value = product.product_id;
+                    fromOption.textContent = `ID ${product.product_id}: ${product.product_name} (Qty: ${product.stock_quantity})`;
+                    fromProductDropdown.appendChild(fromOption);
+
+                    // Create option for the "TO" dropdown
+                    const toOption = document.createElement('option');
+                    toOption.value = product.product_id;
+                    toOption.textContent = `ID ${product.product_id}: ${product.product_name} (Qty: ${product.stock_quantity})`;
+                    toProductDropdown.appendChild(toOption);
+                });
+            } catch (error) {
+                console.error('Error loading product dropdowns:', error);
+            }
+        }
 
 
         // Display Report (with Filtering)
-        // This function fetches products and redraws the table.
         async function loadProducts(filters = {}) {
-            // Build query string from filter object
             const queryParams = new URLSearchParams(filters);
             const queryString = queryParams.toString();
             
@@ -137,14 +185,14 @@
                 productsTbody.innerHTML = '';
                 
                 if (products.length === 0) {
-                    productsTbody.innerHTML = '<tr><td colspan="5">No products found.</td></tr>';
+                    productsTbody.innerHTML = '<tr><td colspan="6">No products found.</td></tr>';
                     return;
                 }
 
                 products.forEach(product => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
-                        <td>${product.product_name}</td>
+                        <td>${product.product_id}</td> <td>${product.product_name}</td>
                         <td>$${product.price.toFixed(2)}</td>
                         <td>${product.stock_quantity}</td>
                         <td>${product.category_name}</td>
@@ -187,7 +235,7 @@
 
         // Form Submit (Handles both INSERT and UPDATE) for products
         form.addEventListener('submit', async (e) => {
-            e.preventDefault(); // Stop form from reloading page
+            e.preventDefault(); 
             
             const id = hiddenId.value;
             const productData = {
@@ -216,6 +264,7 @@
                 
                 resetForm();
                 loadProducts(); 
+                loadProductDropdowns(); // Refresh transaction dropdowns
                 
             } catch (error) {
                 console.error('Error saving product:', error);
@@ -241,12 +290,8 @@
                     throw new Error(err.message || 'Failed to add category');
                 }
 
-                // --- THIS IS THE KEY ---
-                // 1. Clear the input
                 categoryNameInput.value = '';
-                // 2. Reload the categories dropdown
                 loadCategories(); 
-
                 alert('Category added successfully!');
 
             } catch (error) {
@@ -265,6 +310,7 @@
                     method: 'DELETE'
                 });
                 loadProducts(); 
+                loadProductDropdowns();
             } catch (error) {
                 console.error('Error deleting product:', error);
             }
@@ -272,7 +318,6 @@
         
         // Helper function to set up the form for an UPDATE 
         function prepUpdateForm(id, name, price, quantity, categoryId) {
-            // This function is called by the "Edit" button
             formTitle.textContent = 'Edit Product';
             hiddenId.value = id;
             nameInput.value = name;
@@ -293,12 +338,63 @@
             cancelEditButton.style.display = 'none';
         }
         cancelEditButton.addEventListener('click', resetForm);
+        
+        adjustForm.addEventListener('submit', async (e) => {
+            e.preventDefault(); 
+            
+            // Clear previous status message
+            transactionStatus.textContent = '';
+            transactionStatus.style.color = 'black';
+
+            const transferData = {
+                // Get ID from the SELECTED OPTION's VALUE
+                from_product_id: parseInt(fromProductDropdown.value),
+                to_product_id: parseInt(toProductDropdown.value),
+                quantity: parseInt(transferQuantityInput.value)
+            };
+            
+            // Basic validation to prevent transferring to/from the same product
+            if (transferData.from_product_id === transferData.to_product_id) {
+                transactionStatus.textContent = 'Transaction Failed: Cannot transfer stock to the same product.';
+                transactionStatus.style.color = 'red';
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/inventory/adjust`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(transferData)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    transactionStatus.textContent = result.message + " The table below has been refreshed. (See updated quantities).";
+                    transactionStatus.style.color = 'green';
+                    loadProducts(); 
+                    loadProductDropdowns();
+                } else {
+                    transactionStatus.textContent = `Transaction Failed (ROLLBACK): ${result.message || 'Server error'}`;
+                    transactionStatus.style.color = 'red';
+                }
+                
+                // Clear inputs on completion/failure
+                transferQuantityInput.value = '';
+
+            } catch (error) {
+                console.error('Error during transaction:', error);
+                transactionStatus.textContent = 'An unexpected network error occurred during the transfer.';
+                transactionStatus.style.color = 'red';
+            }
+        });
 
 
         // Initial Page Load
         document.addEventListener('DOMContentLoaded', () => {
             loadCategories(); 
             loadProducts(); 
+            loadProductDropdowns();
         });
 
     </script>
